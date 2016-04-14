@@ -1,0 +1,17 @@
+[user]
+	email = michal@zaborowski.info.pl
+	name = Michal Zaborowski
+[core]
+	autocrlf = input
+[push]
+	default = simple
+[pull]
+	rebase = true
+[rerere]
+	enabled = true
+[color]
+	ui = true
+[alias]
+	s = status -s
+	lg = log --oneline --decorate --all --graph
+	go = checkout -B
