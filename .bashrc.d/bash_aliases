@@ -1,0 +1,3 @@
+alias grep='grep --color=auto --exclude-dir=\.git --exclude-dir=.idea' 
+alias ls='ls --color=auto'
+alias echo='echo -e'

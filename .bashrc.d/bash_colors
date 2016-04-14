@@ -1,0 +1,22 @@
+# colors
+export COLOR_RESET='\e[0m'
+
+export BLACK='\e[1;31m'
+export RED='\e[31m'
+export GREEN='\e[1;32m'
+export YELLOW="\e[33m"
+export BLUE="\e[34m"
+export MAGENTA="\e[35m"
+export CYAN="\e[36m"
+export LIGHT_GRAY="\e[37m"
+export DARK_GRAY="\e[90m"
+export LIGHT_RED="\e[91m"
+export LIGHT_GREEN="\e[92m"
+export LIGHT_YELLOW="\e[93m"
+export LIGHT_BLUE="\e[94m"
+export LIGHT_MAGENTA="\e[95m"
+export LIGHT_CYAN="\e[96m"
+export WHITE="\e[97m"
+
+# color 256
+# \e[$38;5;${color}m
