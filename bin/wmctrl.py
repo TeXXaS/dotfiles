@@ -19,7 +19,7 @@ Desktop = namedtuple('Desktop', 'desktop active desktopgeometry viewport working
 Size = namedtuple('Size', 'width height')
 Rect = namedtuple('Rect', ('left', 'top') + Size._fields)
 Window = namedtuple('Window', 'type window desktop pid left top width height classname username title')
-WindowWithCmd = namedtuple('WindowWithCmd', Window._fields + ('cmdline',))
+WindowWithCmd = namedtuple('WindowWithCmd', Window._fields + ('cmdline', 'state'))
 Process = namedtuple('Process', 'pid name username cmdline')
 
 # RegExes used to process wmctrl output
@@ -52,6 +52,10 @@ wm_window_re = re.compile(
     r'(?P<uname>[a-z0-9]+)\s?' +
     r'(?P<title>.*?)$')
 
+xprop_re = re.compile(
+#    r'WM_NAME\((COMPOUND_TEXT|STRING)\) = "(?P<name>.*)"\n' + 
+#    r'_NET_WM_PID\(CARDINAL\) = (?P<pid>[0-9]+)\n' +
+    r'_NET_WM_STATE\(ATOM\) = (?P<state>.*)')
 
 def list_desktops():
     """Call wmctrl program to fetch all desktops. At the moment not much used."""
@@ -101,12 +105,29 @@ def list_windows():
 
 def apply_window_state(window):
     """Update state of the window. Right now that means only geometry. First param for -e is gravity - 0 means leave as it was."""
+    if 'MAXIMIZED_HORZ' in window.state or 'MAXIMIZED_VERT' in window.state:
+        remove_maximized(window)
     cmd = 'wmctrl -ir ' + str(window.window) + \
                     ' -e 0,' + str(window.left) + ',' + str(window.top) + ',' + str(window.width) + ',' + str(window.height)
     ##print cmd
-    res = getoutput(cmd)
+    ##res = 
+    getoutput(cmd)
     ##print res
+    if 'MAXIMIZED_HORZ' in window.state or 'MAXIMIZED_VERT' in window.state:
+        restore_maximized(window)
 
+
+def remove_maximized(window):
+    new_state = ['_NET_WM_STATE_' + s for s in window.state if s != 'MAXIMIZED_HORZ' and s != 'MAXIMIZED_VERT' ]
+    cmd = "xprop -id " + window.window + " -f _NET_WM_STATE 32a -set _NET_WM_STATE " + ",".join(new_state)
+    getoutput(cmd)
+
+
+def restore_maximized(window):
+    new_state = ['_NET_WM_STATE_' + s for s in window.state ]
+    cmd = "xprop -id " + window.window + " -f _NET_WM_STATE 32a -set _NET_WM_STATE " + ",".join(new_state)
+    getoutput(cmd)
+ 
 
 def _get_procs():
     """get list of processes, as pid dict. Used internally"""
@@ -125,6 +146,19 @@ def _get_procs():
     return res
 
 
+def _get_xprops(window_id):
+    """get xprops for window_id"""
+    buf = getoutput('xprop -id ' + window_id + ' _NET_WM_STATE') # WM_NAME _NET_WM_PID
+    grps = xprop_re.search(buf)
+    if grps.group('state'):
+        state_list = [ state.strip().replace('_NET_WM_STATE_', '') for state in grps.group('state').split(',') ]
+    else:
+        state_list = []
+    return { # 'name': grps.group('name'),
+             # 'pid': grps.group('pid'),
+             'state': state_list }
+
+
 def list_windows_with_programs():
     """uses list_windows, and adds `ps -eF` information to have full information"""
     procs = _get_procs()
@@ -137,6 +171,9 @@ def list_windows_with_programs():
         if p:
             buf = w._asdict().copy()
             buf.update({'type': 'WindowWithCmd', 'cmdline': p.cmdline})
+            xprops = _get_xprops(w.window)
+            if xprops:
+                buf.update(xprops)
             wp = WindowWithCmd(**buf)
         else:
             wp = WindowWithCmd(*w)
