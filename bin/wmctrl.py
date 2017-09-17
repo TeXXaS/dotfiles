@@ -87,6 +87,8 @@ def list_windows():
     res = []
     for line in buf.split('\n'):
         grps = wm_window_re.search(line)
+        if grps is None:
+            continue
         w = Window(
             type='Window',
             window=grps.group('win'),
@@ -249,7 +251,7 @@ def main():
     if args.save:
         store_data(args.save)
     elif args.load:
-        restore_data(args.save)
+        restore_data(args.load)
 
     
 if __name__ == "__main__":
