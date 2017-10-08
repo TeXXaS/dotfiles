@@ -1,14 +1,19 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
+# TODO - use structured logs instead of regex
+
 import re
 import psutil
 import argparse
+
 try:
     import simplejson as json
+
     as_json = True
 except:
     import pickle
+
     as_json = False
 
 from commands import getoutput
@@ -19,12 +24,12 @@ Desktop = namedtuple('Desktop', 'desktop active desktopgeometry viewport working
 Size = namedtuple('Size', 'width height')
 Rect = namedtuple('Rect', ('left', 'top') + Size._fields)
 Window = namedtuple('Window', 'type window desktop pid left top width height classname username title')
-WindowWithCmd = namedtuple('WindowWithCmd', Window._fields + ('cmdline', 'state'))
+WindowWithCmd = namedtuple('WindowWithCmd', Window._fields + ('cmdline',))
 Process = namedtuple('Process', 'pid name username cmdline')
 
 # RegExes used to process wmctrl output
 wm_desktop_re = re.compile(
-    r'(?P<desktop>[0-9]+)\s+' + 
+    r'(?P<desktop>[0-9]+)\s+' +
     r'(?P<active>[\-\*])\s+' +
     r'DG\:\s+' +
     r'(?P<dg_width>[0-9]+)' +
@@ -33,29 +38,25 @@ wm_desktop_re = re.compile(
     r'VP\:\s+' +
     r'(?P<vp>(N/A|[0-9\,]+))\s+' +
     'WA:\s+'
-    r'(?P<wa_left>[0-9]+)' +
+    r'(?P<wa_left>[\-0-9]+)' +
     ',' +
-    r'(?P<wa_top>[0-9]+)\s+'
+    r'(?P<wa_top>[\-0-9]+)\s+'
     r'(?P<wa_width>[0-9]+)' +
     'x' +
-    r'(?P<wa_height>[0-9]+)\s+' +                           
+    r'(?P<wa_height>[0-9]+)\s+' +
     r'(?P<title>.*?)$')
 wm_window_re = re.compile(
     r'(?P<win>[A-Za-z0-9]+)\s+' +
     r'(?P<desktop>[\-0-9]+)\s+' +
     r'(?P<pid>[0-9]+)\s+' +
-    r'(?P<left>[0-9]+)\s+' +
-    r'(?P<top>[0-9]+)\s+' +
+    r'(?P<left>[\-0-9]+)\s+' +
+    r'(?P<top>[\-0-9]+)\s+' +
     r'(?P<width>[0-9]+)\s+' +
     r'(?P<height>[0-9]+)\s+' +
-    r'(?P<class>[A-Za-z0-9\-\.]+)\s+' +
-    r'(?P<uname>[a-z0-9]+)\s?' +
+    r'(?P<class>[A-Za-z0-9\-\.\_]+)\s+' +
+    r'(?P<uname>[a-z0-9\-\_]+)\s?' +
     r'(?P<title>.*?)$')
 
-xprop_re = re.compile(
-#    r'WM_NAME\((COMPOUND_TEXT|STRING)\) = "(?P<name>.*)"\n' + 
-#    r'_NET_WM_PID\(CARDINAL\) = (?P<pid>[0-9]+)\n' +
-    r'_NET_WM_STATE\(ATOM\) = (?P<state>.*)')
 
 def list_desktops():
     """Call wmctrl program to fetch all desktops. At the moment not much used."""
@@ -64,7 +65,7 @@ def list_desktops():
     for line in buf.split('\n'):
         grps = wm_desktop_re.search(line)
         dg = Size(
-            width=int(grps.group('dg_width')), 
+            width=int(grps.group('dg_width')),
             height=int(grps.group('dg_height')))
         wa = Rect(
             left=int(grps.group('wa_left')),
@@ -88,48 +89,34 @@ def list_windows():
     for line in buf.split('\n'):
         grps = wm_window_re.search(line)
         if grps is None:
+            print "not matched " + line
             continue
         w = Window(
             type='Window',
             window=grps.group('win'),
-            desktop=int(grps.group('desktop')), 
-            pid=int(grps.group('pid')), 
-            left=int(grps.group('left')), 
-            top=int(grps.group('top')), 
-            width=int(grps.group('width')), 
-            height=int(grps.group('height')), 
-            classname=grps.group('class'), 
-            username=grps.group('uname'), 
+            desktop=int(grps.group('desktop')),
+            pid=int(grps.group('pid')),
+            left=int(grps.group('left')),
+            top=int(grps.group('top')),
+            width=int(grps.group('width')),
+            height=int(grps.group('height')),
+            classname=grps.group('class'),
+            username=grps.group('uname'),
             title=grps.group('title'))
         res.append(w)
     return res
 
 
-def apply_window_state(window):
+def apply_window_state(stored, active):
     """Update state of the window. Right now that means only geometry. First param for -e is gravity - 0 means leave as it was."""
-    if 'MAXIMIZED_HORZ' in window.state or 'MAXIMIZED_VERT' in window.state:
-        remove_maximized(window)
-    cmd = 'wmctrl -ir ' + str(window.window) + \
-                    ' -e 0,' + str(window.left) + ',' + str(window.top) + ',' + str(window.width) + ',' + str(window.height)
-    ##print cmd
-    ##res = 
-    getoutput(cmd)
-    ##print res
-    if 'MAXIMIZED_HORZ' in window.state or 'MAXIMIZED_VERT' in window.state:
-        restore_maximized(window)
+    print 'active: ' + active.classname + ' ' + active.title
+    print ' -> ' + stored.classname + ' ' + stored.title
+    cmd = 'wmctrl -ir ' + str(active.window) + \
+          ' -e 0,' + str(stored.left) + ',' + str(stored.top) + ',' + str(stored.width) + ',' + str(stored.height)
+    print cmd
+    res = getoutput(cmd)
+    print res
 
-
-def remove_maximized(window):
-    new_state = ['_NET_WM_STATE_' + s for s in window.state if s != 'MAXIMIZED_HORZ' and s != 'MAXIMIZED_VERT' ]
-    cmd = "xprop -id " + window.window + " -f _NET_WM_STATE 32a -set _NET_WM_STATE " + ",".join(new_state)
-    getoutput(cmd)
-
-
-def restore_maximized(window):
-    new_state = ['_NET_WM_STATE_' + s for s in window.state ]
-    cmd = "xprop -id " + window.window + " -f _NET_WM_STATE 32a -set _NET_WM_STATE " + ",".join(new_state)
-    getoutput(cmd)
- 
 
 def _get_procs():
     """get list of processes, as pid dict. Used internally"""
@@ -138,7 +125,7 @@ def _get_procs():
         try:
             psProc = psutil.Process(i.pid)
             proc = Process(
-                pid=psProc.pid, 
+                pid=psProc.pid,
                 name=psProc.name(),
                 username=psProc.username(),
                 cmdline=psProc.cmdline())
@@ -146,19 +133,6 @@ def _get_procs():
         except Exception, e:
             print "got error " + str(e) + " while fetching system processes information - " + str(i)
     return res
-
-
-def _get_xprops(window_id):
-    """get xprops for window_id"""
-    buf = getoutput('xprop -id ' + window_id + ' _NET_WM_STATE') # WM_NAME _NET_WM_PID
-    grps = xprop_re.search(buf)
-    if grps.group('state'):
-        state_list = [ state.strip().replace('_NET_WM_STATE_', '') for state in grps.group('state').split(',') ]
-    else:
-        state_list = []
-    return { # 'name': grps.group('name'),
-             # 'pid': grps.group('pid'),
-             'state': state_list }
 
 
 def list_windows_with_programs():
@@ -173,9 +147,6 @@ def list_windows_with_programs():
         if p:
             buf = w._asdict().copy()
             buf.update({'type': 'WindowWithCmd', 'cmdline': p.cmdline})
-            xprops = _get_xprops(w.window)
-            if xprops:
-                buf.update(xprops)
             wp = WindowWithCmd(**buf)
         else:
             wp = WindowWithCmd(*w)
@@ -209,16 +180,35 @@ def to_namedtoople(buf):
         return buf
 
 
-def match_window(w, windows):
-    for i in windows:
-        if w.pid == i.pid and w.window == i.window:
-            return i
-        elif w.classname == i.classname and (w.pid == i.pid or w.window == i.window or w.title == i.title):
-            return i
+def match_window(active, loaded_windows):
+    for loaded in loaded_windows:
+        if active.pid == loaded.pid and active.window == loaded.window:
+            ## print " pid and window match " + str(active) + "\n with " + str(active)
+            return loaded
+        elif (active.cmdline == loaded.cmdline or active.pid == loaded.pid or active.window == loaded.window) \
+                and (active.classname == loaded.classname or active.title == loaded.title):
+            ## print " matched " + str(active) + "\n with " + str(active)
+            return loaded
+        elif (active.cmdline[0] == loaded.cmdline[0]):
+            ## print " matched II " + str(active) + "\n with " + str(active)
+            return loaded
+
+    print " not matched " + str(active)
     return None
 
 
-def restore_data(filename):
+def move_to_bigger_screen(window):
+    """Update state of the window, by moving it to second screen."""
+    if (window.left >= 1920):
+        return
+    cmd = 'wmctrl -ir ' + str(window.window) + \
+          ' -e 0,' + str(window.left + 1920) + ',' + str(window.top) + ',' + str(window.width) + ',' + str(window.height)
+    print cmd
+    res = getoutput(cmd)
+    print res
+
+
+def restore_data(filename, setup):
     """load list of windows from file, and apply settings to windows, that are available"""
     if as_json:
         with open(filename, 'r') as f:
@@ -230,29 +220,39 @@ def restore_data(filename):
 
     loaded_windows = data['windows']
     active_windows = list_windows_with_programs()
-    for w in loaded_windows:
-        if w.desktop == -1:
+    print active_windows
+    for aw in active_windows:
+        if aw.classname in ['xfce4-panel.Xfce4-panel', 'xfdesktop.Xfdesktop']:
             continue
-        aw = match_window(w, active_windows)
-        if aw != None and aw.desktop != -1:
-            #merge states,
-            apply_window_state(w)
+        loaded = match_window(aw, loaded_windows)
+        if loaded != None and loaded.desktop != -1:
+            # merge states,
+            apply_window_state(loaded, aw)
+            continue
+        if setup == 'multi':
+            move_to_bigger_screen(aw)
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("-s", "--save", dest='save', 
+    parser.add_argument("-s", "--save", dest='save',
                         help="store current content into passed file")
     parser.add_argument("-l", "--load", dest='load',
                         help="load positions form passed file")
-
+    parser.add_argument("single", dest="setup",
+                        help="is this single monitor setting")
+    parser.add_argument("multi", dest="setup",
+                        help="is this multi monitor setting")
     args = parser.parse_args()
-    
+    ## print args
+
     if args.save:
+        print "storing data in " + args.save
         store_data(args.save)
     elif args.load:
-        restore_data(args.load)
+        print "loading data from " + args.load
+        restore_data(args.load, args.setup)
 
-    
+
 if __name__ == "__main__":
     main()
