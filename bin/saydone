@@ -1,0 +1,8 @@
+#!/bin/bash
+
+#($@)
+if [ $? = 0 ]; then
+  notify-send ":-) done: $@"
+else
+  notify-send --urgency=critical ":( failed: $@"
+fi
