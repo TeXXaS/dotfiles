@@ -1,0 +1,188 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+# vim: tabstop=4 expandtab shiftwidth=4 softtabstop=4 smarttab
+
+import boto3
+import os.path
+from passpy import Store
+from datetime import datetime,timedelta
+import click
+
+import pprint
+
+ENVS = ['test', 'qa', 'prod', 'prep']
+store = Store()
+
+class Account:
+    """Describes particular aws account - that mean - access_key + secret,
+    and list of keys, that are present at the account, for credentials"""
+    def __init__(self, **kwargs):
+        self.env = kwargs['env']
+        self.local = self._read_str_to_dict(kwargs['local'])
+        self.iam = None
+        self.keys = None
+
+    def instantionate_iam(self):
+        self.iam = boto3.client('iam',
+               aws_access_key_id=self.local['aws_access_key_id'],
+               aws_secret_access_key=self.local['aws_secret_access_key'])
+
+    def fetch_keys(self):
+        if self.iam is None:
+            self.instantionate_iam()
+        keys = self.iam.list_access_keys()
+        keys_data = []
+        for content in keys['AccessKeyMetadata']:
+            keys_data.append(self._transcode_key(content))
+        self.keys = keys_data
+
+    @staticmethod
+    def _transcode_key(content):
+        now = datetime.now(content['CreateDate'].tzinfo)
+        return {
+            'user_name': content['UserName'],
+            'access_key_id': content['AccessKeyId'],
+            'status': content['Status'],
+            'create_date': content['CreateDate'],
+            'age': now - content['CreateDate']
+        }
+
+    @staticmethod
+    def _read_str_to_dict(input):
+        res = {}
+        for l in input.split('\n'):
+            k, v = l.partition("=")[::2]
+            k,v = k.strip(), v.strip()
+            if k != '' and v != '':
+                res[k.strip()] = v.strip()
+        return res
+
+    @staticmethod
+    def _write_key_to_str(key):
+        """prepare data to be stored in pass-store"""
+        return f"""aws_access_key_id = {key['access_key_id']}
+aws_secret_access_key = {key['secret_access_key']}"""
+
+    def create_new_key(self, user_name):
+        """Create new key"""
+        if self.iam is None:
+            self.instantionate_iam()
+        response = self.iam.create_access_key(UserName=user_name)
+        print(response)
+        key = self._transcode_key(response['AccessKey'])
+        key['secret_access_key'] = response['AccessKey']['SecretAccessKey']
+        content = self._write_key_to_str(key)
+        store.set_key(f"aws/{self.env}", content, force=True)
+
+    def remove_key(self, key):
+        """remove key"""
+        if self.iam is None:
+            self.instantionate_iam()
+        print('removing oldest')
+        response = self.iam.delete_access_key(
+            UserName=key['user_name'],
+            AccessKeyId=key['access_key_id'])
+        self.keys.remove(key)
+        print(response)
+
+    def roll_keys(self):
+        """Find oldest key, and call roll on it"""
+        try:
+            if self.iam is None:
+                self.instantionate_iam()
+            if self.keys is None:
+                self.fetch_keys()
+
+            if len(self.keys) > 1:
+                # look what to delete, at least one key is needed, to 
+                # get into env...
+                two_years = timedelta(days=365*2)
+                keys = sorted(self.keys, reverse=True,
+                        key=lambda i:i['age'].total_seconds() if i['status'] == 'Active'
+                            else i['age'].total_seconds() + two_years.total_seconds())
+                self.remove_key(keys[0])
+            if len(self.keys) == 0:
+                raise Exception('No keys at server? Something went wrong...')
+            else:
+                user_name = self.keys[0]['user_name']
+            self.create_new_key(user_name)
+        except Exception as e:
+            print(e)
+
+    def __repr__(self):
+        return "{}({})".format(self.__class__, self.__dict__)
+
+
+def get_all():
+    """get all the data"""
+    res = {}
+    for e in ENVS:
+        access_context = store.get_key(f'aws/{e}')
+        res[e] = Account(env=e, local=access_context)
+    return res
+
+
+def put_credentials(env):
+    """Write new credentials to ~/.aws/credentials"""
+    pp = pprint.PrettyPrinter(indent=4)
+    pp.pprint(env)
+    content = f"""[default]
+aws_access_key_id = {env.local['aws_access_key_id']}
+aws_secret_access_key = {env.local['aws_secret_access_key']}
+"""
+    with open(os.path.expanduser('~/.aws/credentials'), "w") as f:
+        f.truncate(0)
+        f.write(content)
+
+
+def put_account(account_name):
+    """Write new account name to ~/.aws/account"""
+    content = f"""{account_name}"""
+    with open(os.path.expanduser('~/.aws/account'), "w") as f:
+        f.truncate(0)
+        f.write(content)
+
+
+@click.group()
+def cli():
+    pass
+
+   
+@cli.command(help="Show all remote information")
+@click.argument('side', default='local')
+def list_envs(side):
+    envs = get_all()
+    if 'local' != side.lower():
+        for name in envs.keys():
+            env = envs[name]
+            env.fetch_keys()
+    pp = pprint.PrettyPrinter(indent=4)
+    pp.pprint(envs)
+
+
+@cli.command()
+def roll():
+    envs = get_all()
+    for name in envs.keys():
+        env = envs[name]
+        env.roll_keys()
+
+
+@click.command(help='Set environment in ~/.aws - credentials, account name')
+@click.argument("name", nargs=1)
+def use(name):
+    envs = get_all()
+    if not name in envs.keys():
+        print(f"sorrry {name} is not valid env name - plase see list-envs")
+    else:
+        env = envs[name]
+        put_credentials(env)
+        put_account(name)
+
+
+cli.add_command(list_envs)
+cli.add_command(roll)
+cli.add_command(use)
+
+if __name__ == '__main__':
+    cli()
