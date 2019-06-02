@@ -11,6 +11,8 @@ from passpy import Store
 
 STORE_PATH = "accounting/clockify"
 
+#colors by https://pypi.org/project/colored/
+
 
 class Clockify:
     def __init__(self, config=None):
