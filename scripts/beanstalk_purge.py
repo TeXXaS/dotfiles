@@ -14,8 +14,8 @@ for app in app_response['Applications']:
 
     vers_response = eb_client.describe_application_versions(ApplicationName=app['ApplicationName'])
     versions = sorted(vers_response.get('ApplicationVersions', []), key=lambda v: v['DateCreated'])
+    versions = versions[:EXPECTED_COUNT]
     print(F'{app["ApplicationName"]} removing - {versions_count} versions')
-    cnt = versions_count
     for ver in versions:
         print (F'removing - {VersionLabel} - {DateCreated} ')
         response = eb_client.delete_application_version(
